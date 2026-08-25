@@ -7,3 +7,10 @@
 - [x] Add concise privacy and remediation guidance for breached passwords.
 - [x] Validate TypeScript, production build, and responsive presentation.
 - [x] Save an updated delivery checkpoint.
+
+## GitHub Publishing
+
+- [ ] Confirm the working tree and current branch.
+- [ ] Create a private GitHub repository named `password-strength-analyzer`.
+- [ ] Commit and push the latest project state.
+- [ ] Verify the remote URL and pushed branch.
