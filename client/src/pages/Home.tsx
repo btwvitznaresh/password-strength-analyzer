@@ -1,6 +1,6 @@
 /* Editorial Security Lab: warm paper, ink-black type, signal lime, asymmetric research-notebook layout, restrained motion, and DM Serif Display + Plus Jakarta Sans + IBM Plex Mono. */
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ArrowUpRight,
   Check,
@@ -20,6 +20,7 @@ import {
 import { toast } from "sonner";
 
 type CheckStatus = "pass" | "warn" | "fail" | "idle";
+type BreachStatus = "idle" | "checking" | "not-found" | "found" | "error";
 
 type CheckItem = {
   label: string;
@@ -195,12 +196,50 @@ function formatScore(value: number) {
   return String(value).padStart(2, "0");
 }
 
+async function sha1Hex(value: string) {
+  const digest = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+
 export default function Home() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [copied, setCopied] = useState<string | null>(null);
+  const [breachStatus, setBreachStatus] = useState<BreachStatus>("idle");
+  const [breachCount, setBreachCount] = useState(0);
+  const breachRequest = useRef(0);
   const analysis = useMemo(() => getAnalysis(password), [password]);
+
+  async function handleBreachCheck() {
+    if (!password) {
+      toast.error("Enter a password before checking");
+      return;
+    }
+    const requestId = breachRequest.current + 1;
+    breachRequest.current = requestId;
+    setBreachStatus("checking");
+    setBreachCount(0);
+    try {
+      const hash = await sha1Hex(password);
+      const response = await fetch(`https://api.pwnedpasswords.com/range/${hash.slice(0, 5)}`, {
+        headers: { "Add-Padding": "true" },
+      });
+      if (!response.ok) throw new Error(`Breach lookup failed with ${response.status}`);
+      const matches = (await response.text()).split("\\n");
+      const match = matches.find((line) => line.trim().startsWith(hash.slice(5)));
+      if (requestId !== breachRequest.current) return;
+      if (match) {
+        const count = Number(match.split(":")[1]?.trim() ?? 0);
+        setBreachCount(Number.isFinite(count) ? count : 0);
+        setBreachStatus("found");
+      } else {
+        setBreachStatus("not-found");
+      }
+    } catch {
+      if (requestId === breachRequest.current) setBreachStatus("error");
+    }
+  }
 
   function handleGenerate() {
     setSuggestions(Array.from({ length: 3 }, createSuggestion));
@@ -278,7 +317,7 @@ export default function Home() {
                   id="password-input"
                   type={showPassword ? "text" : "password"}
                   value={password}
-                  onChange={(event) => setPassword(event.target.value)}
+                  onChange={(event) => { setPassword(event.target.value); setBreachStatus("idle"); setBreachCount(0); }}
                   placeholder="Type something worth protecting"
                   autoComplete="off"
                   spellCheck={false}
@@ -305,6 +344,13 @@ export default function Home() {
             <div className="privacy-card">
               <div className="privacy-card-icon"><ShieldCheck size={18} /></div>
               <div><strong>Private by design.</strong><p>Analysis happens in your browser. For real accounts, use a password manager and never reuse a password across sites.</p></div>
+            </div>
+
+            <div className={`breach-card breach-${breachStatus}`}>
+              <div className="card-topline"><span className="mono-label">BREACH DATABASE</span><Fingerprint size={16} /></div>
+              <div className="breach-card-copy"><strong>{breachStatus === "found" ? "This password has been exposed." : breachStatus === "not-found" ? "No exposure found." : breachStatus === "checking" ? "Checking known breaches…" : breachStatus === "error" ? "The lookup is unavailable." : "Check for known exposure."}</strong><p>{breachStatus === "found" ? `Seen ${breachCount.toLocaleString()} times in known breach data. Do not use it.` : breachStatus === "not-found" ? "No match was returned from the current dataset. Keep it unique anyway." : breachStatus === "checking" ? "Hashing locally, then sending only five hash characters." : breachStatus === "error" ? "Your local strength result is still available. Try again in a moment." : "Use a k-anonymity lookup to check whether this exact password has appeared before."}</p></div>
+              <button className="breach-action" type="button" onClick={handleBreachCheck} disabled={breachStatus === "checking" || !password}><span className={breachStatus === "checking" ? "spin" : ""}><RefreshCw size={14} /></span>{breachStatus === "checking" ? "Checking…" : "Check securely"}<ArrowUpRight size={14} /></button>
+              <span className="breach-privacy">Only the first 5 characters of a local SHA-1 hash are sent.</span>
             </div>
           </div>
 
